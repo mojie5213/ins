@@ -16,7 +16,6 @@ export async function onRequestGet(context) {
     }
 
     try {
-        // 使用你在 RapidAPI 上找到的正确 Host
         const apiHost = 'instagram-downloader-download-instagram-stories-videos4.p.rapidapi.com';
         const apiRequestUrl = `https://${apiHost}/?url=${encodeURIComponent(targetUrl)}`;
 
@@ -28,13 +27,13 @@ export async function onRequestGet(context) {
             }
         });
 
+        // 如果失败，把 RapidAPI 返回的具体错误信息和状态码捕获并返回
         if (!apiRes.ok) {
-            throw new Error('第三方解析服务响应失败');
+            const errText = await apiRes.text();
+            throw new Error(`API 拒绝响应 (状态码 ${apiRes.status}): ${errText}`);
         }
 
         const data = await apiRes.json();
-        
-        // 兼容处理该接口常见的返回字段
         const imageUrl = data.url || data.media || data.imageUrl || (data.data && data.data[0]);
         const authorName = data.owner || data.username || 'instagram_user';
 
@@ -47,7 +46,7 @@ export async function onRequestGet(context) {
                 headers: { 'Content-Type': 'application/json' }
             });
         } else {
-            return new Response(JSON.stringify({ success: false, error: '未能从返回数据中找到图片' }), {
+            return new Response(JSON.stringify({ success: false, error: `未找到图片，返回数据: ${JSON.stringify(data)}` }), {
                 headers: { 'Content-Type': 'application/json' }
             });
         }
