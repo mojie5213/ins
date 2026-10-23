@@ -168,30 +168,6 @@
             return;
         }
 
-        if (isDirectoryPickerSupported && !dirHandle) {
-            statusEl.className = '';
-            statusEl.innerText = '请先点击“浏览”选择本地保存文件夹';
-            return;
-        }
-
-        // 【关键修复】在发起网络请求之前，立刻请求并确认文件夹权限，保持用户手势激活状态
-        if (isDirectoryPickerSupported && dirHandle) {
-            try {
-                const opts = { mode: 'readwrite' };
-                if ((await dirHandle.queryPermission(opts)) !== 'granted') {
-                    if ((await dirHandle.requestPermission(opts)) !== 'granted') {
-                        statusEl.className = '';
-                        statusEl.innerText = '错误: 用户拒绝了文件夹写入权限';
-                        return;
-                    }
-                }
-            } catch (permErr) {
-                statusEl.className = '';
-                statusEl.innerText = `权限获取失败: ${permErr.message}`;
-                return;
-            }
-        }
-
         statusEl.className = '';
         statusEl.innerText = '正在解析中，请稍候...';
         previewContainer.innerHTML = '';
@@ -213,13 +189,24 @@
                 const blob = await imgRes.blob();
                 const fileName = `ins_${Date.now()}_${index}.jpg`;
 
+                let savedViaDirectory = false;
+                
+                // 尝试写入用户选择的文件夹
                 if (isDirectoryPickerSupported && dirHandle) {
-                    const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
-                    const fileHandle = await authorFolderHandle.getFileHandle(fileName, { create: true });
-                    const writable = await fileHandle.createWritable();
-                    await writable.write(blob);
-                    await writable.close();
-                } else {
+                    try {
+                        const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
+                        const fileHandle = await authorFolderHandle.getFileHandle(fileName, { create: true });
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                        savedViaDirectory = true;
+                    } catch (fsErr) {
+                        console.warn('文件夹写入失败，自动降级为网页下载:', fsErr);
+                    }
+                }
+
+                // 如果文件夹写入失败或未选择，自动无缝降级为标准网页下载
+                if (!savedViaDirectory) {
                     const blobUrl = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = blobUrl;
@@ -238,11 +225,7 @@
             }
 
             statusEl.className = 'success';
-            if (isDirectoryPickerSupported && dirHandle) {
-                statusEl.innerText = `下载成功！共保存 ${result.imageUrls.length} 张图片到 "${result.authorName}" 文件夹。`;
-            } else {
-                statusEl.innerText = `下载成功！共处理 ${result.imageUrls.length} 张图片（已触发浏览器下载）。`;
-            }
+            statusEl.innerText = `下载成功！共处理 ${result.imageUrls.length} 张图片。`;
 
         } catch (err) {
             statusEl.className = '';
