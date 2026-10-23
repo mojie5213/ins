@@ -7,15 +7,14 @@ export async function onRequestGet(context) {
     }
 
     try {
-        // 通过 Cloudflare 服务器端发起请求，完美绕过浏览器 CORS 跨域限制
         const imageRes = await fetch(targetUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
             }
         });
 
         if (!imageRes.ok) {
-            return new Response('获取图片失败', { status: 500 });
+            return new Response(`上游图片响应失败: ${imageRes.status}`, { status: 500 });
         }
 
         const responseHeaders = new Headers(imageRes.headers);
