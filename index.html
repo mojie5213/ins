@@ -184,14 +184,15 @@
 
             let index = 1;
             for (let imgUrl of result.imageUrls) {
-                const imgRes = await fetch(imgUrl);
+                // 通过我们自己的后端代理接口获取图片，彻底解决 CORS 跨域问题
+                const proxyUrl = `/api/proxy?url=${encodeURIComponent(imgUrl)}`;
+                const imgRes = await fetch(proxyUrl);
                 if (!imgRes.ok) continue;
                 const blob = await imgRes.blob();
                 const fileName = `ins_${Date.now()}_${index}.jpg`;
 
                 let savedViaDirectory = false;
                 
-                // 尝试写入用户选择的文件夹
                 if (isDirectoryPickerSupported && dirHandle) {
                     try {
                         const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
@@ -205,7 +206,6 @@
                     }
                 }
 
-                // 如果文件夹写入失败或未选择，自动无缝降级为标准网页下载
                 if (!savedViaDirectory) {
                     const blobUrl = URL.createObjectURL(blob);
                     const a = document.createElement('a');
