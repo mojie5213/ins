@@ -142,11 +142,9 @@
     const statusEl = document.getElementById('status');
     const previewContainer = document.getElementById('previewContainer');
 
-    // 如果浏览器不支持文件系统 API（如手机端 Safari），隐藏文件夹选择栏
     if (!isDirectoryPickerSupported) {
         folderGroup.style.display = 'none';
     } else {
-        // 电脑端：选择本地文件夹
         selectDirBtn.addEventListener('click', async () => {
             try {
                 dirHandle = await window.showDirectoryPicker();
@@ -162,7 +160,6 @@
         });
     }
 
-    // 点击开始下载
     downloadBtn.addEventListener('click', async () => {
         const postUrl = urlInput.value.trim();
         if (!postUrl) {
@@ -171,11 +168,28 @@
             return;
         }
 
-        // 如果是电脑端且支持文件夹选择，但用户没选
         if (isDirectoryPickerSupported && !dirHandle) {
             statusEl.className = '';
             statusEl.innerText = '请先点击“浏览”选择本地保存文件夹';
             return;
+        }
+
+        // 【关键修复】在发起网络请求之前，立刻请求并确认文件夹权限，保持用户手势激活状态
+        if (isDirectoryPickerSupported && dirHandle) {
+            try {
+                const opts = { mode: 'readwrite' };
+                if ((await dirHandle.queryPermission(opts)) !== 'granted') {
+                    if ((await dirHandle.requestPermission(opts)) !== 'granted') {
+                        statusEl.className = '';
+                        statusEl.innerText = '错误: 用户拒绝了文件夹写入权限';
+                        return;
+                    }
+                }
+            } catch (permErr) {
+                statusEl.className = '';
+                statusEl.innerText = `权限获取失败: ${permErr.message}`;
+                return;
+            }
         }
 
         statusEl.className = '';
@@ -200,14 +214,12 @@
                 const fileName = `ins_${Date.now()}_${index}.jpg`;
 
                 if (isDirectoryPickerSupported && dirHandle) {
-                    // 电脑端：自动创建作者专属子文件夹并保存
                     const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
                     const fileHandle = await authorFolderHandle.getFileHandle(fileName, { create: true });
                     const writable = await fileHandle.createWritable();
                     await writable.write(blob);
                     await writable.close();
                 } else {
-                    // 手机端 / 不支持的浏览器：直接触发浏览器默认下载
                     const blobUrl = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = blobUrl;
@@ -218,7 +230,6 @@
                     URL.revokeObjectURL(blobUrl);
                 }
 
-                // 页面展示缩略图预览
                 const imgTag = document.createElement('img');
                 imgTag.src = URL.createObjectURL(blob);
                 previewContainer.appendChild(imgTag);
