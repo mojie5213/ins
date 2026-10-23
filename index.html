@@ -11,7 +11,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
         }
         .card {
@@ -90,7 +90,7 @@
         }
         .preview-container {
             margin-top: 15px;
-            max-height: 180px;
+            max-height: 220px;
             overflow-y: auto;
             display: flex;
             flex-wrap: wrap;
@@ -98,11 +98,17 @@
             justify-content: center;
         }
         .preview-container img {
-            width: 55px;
-            height: 55px;
+            width: 70px;
+            height: 70px;
             object-fit: cover;
-            border-radius: 4px;
+            border-radius: 6px;
             border: 1px solid #dcdfe6;
+            cursor: pointer;
+        }
+        .tip {
+            font-size: 12px;
+            color: #909399;
+            margin-top: 8px;
         }
     </style>
 </head>
@@ -124,9 +130,10 @@
         </div>
     </div>
 
-    <button class="submit-btn" id="downloadBtn">开始下载</button>
+    <button class="submit-btn" id="downloadBtn">开始下载 / 解析</button>
     
     <div id="status"></div>
+    <div class="tip" id="tipText"></div>
     <div class="preview-container" id="previewContainer"></div>
 </div>
 
@@ -140,6 +147,7 @@
     const downloadBtn = document.getElementById('downloadBtn');
     const urlInput = document.getElementById('urlInput');
     const statusEl = document.getElementById('status');
+    const tipText = document.getElementById('tipText');
     const previewContainer = document.getElementById('previewContainer');
 
     if (!isDirectoryPickerSupported) {
@@ -171,6 +179,7 @@
         statusEl.className = '';
         statusEl.innerText = '正在解析中，请稍候...';
         previewContainer.innerHTML = '';
+        tipText.innerText = '';
 
         try {
             const res = await fetch(`/api/get-image?url=${encodeURIComponent(postUrl)}`);
@@ -180,56 +189,54 @@
                 throw new Error(result.error || '未找到图片');
             }
 
-            statusEl.innerText = `解析成功，正在下载 ${result.imageUrls.length} 张图片...`;
-
             let index = 1;
-            for (let imgUrl of result.imageUrls) {
-                // 通过我们自己的后端代理接口获取图片，彻底解决 CORS 跨域问题
-                const proxyUrl = `/api/proxy?url=${encodeURIComponent(imgUrl)}`;
-                const imgRes = await fetch(proxyUrl);
-                if (!imgRes.ok) continue;
-                const blob = await imgRes.blob();
-                const fileName = `ins_${Date.now()}_${index}.jpg`;
 
-                let savedViaDirectory = false;
+            // 电脑端且选择了文件夹：执行自动批量写入本地文件夹
+            if (isDirectoryPickerSupported && dirHandle) {
+                statusEl.innerText = `解析成功，正在下载 ${result.imageUrls.length} 张图片到本地...`;
                 
-                if (isDirectoryPickerSupported && dirHandle) {
-                    try {
-                        const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
-                        const fileHandle = await authorFolderHandle.getFileHandle(fileName, { create: true });
-                        const writable = await fileHandle.createWritable();
-                        await writable.write(blob);
-                        await writable.close();
-                        savedViaDirectory = true;
-                    } catch (fsErr) {
-                        console.warn('文件夹写入失败，自动降级为网页下载:', fsErr);
-                    }
+                const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
+
+                for (let imgUrl of result.imageUrls) {
+                    const proxyUrl = `/api/proxy?url=${encodeURIComponent(imgUrl)}`;
+                    const imgRes = await fetch(proxyUrl);
+                    if (!imgRes.ok) continue;
+                    const blob = await imgRes.blob();
+                    const fileName = `ins_${Date.now()}_${index}.jpg`;
+
+                    const fileHandle = await authorFolderHandle.getFileHandle(fileName, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+
+                    const imgTag = document.createElement('img');
+                    imgTag.src = URL.createObjectURL(blob);
+                    previewContainer.appendChild(imgTag);
+                    index++;
                 }
 
-                if (!savedViaDirectory) {
-                    const blobUrl = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = blobUrl;
-                    a.download = fileName;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(blobUrl);
+                statusEl.className = 'success';
+                statusEl.innerText = `下载成功！共保存 ${result.imageUrls.length} 张图片到 "${result.authorName}" 文件夹。`;
+
+            } else {
+                // 手机端 / 不支持的浏览器：直接渲染代理图片，支持长按保存到相册
+                statusEl.className = 'success';
+                statusEl.innerText = `解析成功！共找到 ${result.imageUrls.length} 张图片。`;
+                tipText.innerText = '💡 手机端提示：请直接长按下方预览图片，选择“添加到照片”保存到相册。';
+
+                for (let imgUrl of result.imageUrls) {
+                    const proxyUrl = `/api/proxy?url=${encodeURIComponent(imgUrl)}`;
+                    
+                    const imgTag = document.createElement('img');
+                    imgTag.src = proxyUrl;
+                    previewContainer.appendChild(imgTag);
+                    index++;
                 }
-
-                const imgTag = document.createElement('img');
-                imgTag.src = URL.createObjectURL(blob);
-                previewContainer.appendChild(imgTag);
-
-                index++;
             }
-
-            statusEl.className = 'success';
-            statusEl.innerText = `下载成功！共处理 ${result.imageUrls.length} 张图片。`;
 
         } catch (err) {
             statusEl.className = '';
-            statusEl.innerText = `下载失败: ${err.message}`;
+            statusEl.innerText = `处理失败: ${err.message}`;
         }
     });
 </script>
