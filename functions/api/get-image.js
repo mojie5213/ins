@@ -17,7 +17,8 @@ export async function onRequestGet(context) {
 
     try {
         const apiHost = 'instagram-downloader-download-instagram-stories-videos4.p.rapidapi.com';
-        const apiRequestUrl = `https://${apiHost}/?url=${encodeURIComponent(targetUrl)}`;
+        const apiPath = '/convert'; // 确认使用 /convert 路径
+        const apiRequestUrl = `https://${apiHost}${apiPath}?url=${encodeURIComponent(targetUrl)}`;
 
         const apiRes = await fetch(apiRequestUrl, {
             method: 'GET',
@@ -27,15 +28,24 @@ export async function onRequestGet(context) {
             }
         });
 
-        // 如果失败，把 RapidAPI 返回的具体错误信息和状态码捕获并返回
         if (!apiRes.ok) {
             const errText = await apiRes.text();
             throw new Error(`API 拒绝响应 (状态码 ${apiRes.status}): ${errText}`);
         }
 
         const data = await apiRes.json();
-        const imageUrl = data.url || data.media || data.imageUrl || (data.data && data.data[0]);
-        const authorName = data.owner || data.username || 'instagram_user';
+        
+        // 兼容处理该 API 的返回格式
+        let imageUrl = '';
+        if (data.media && Array.isArray(data.media) && data.media.length > 0) {
+            imageUrl = data.media[0].u || data.media[0].th;
+        } else if (data.url) {
+            imageUrl = data.url;
+        } else if (data.download_url) {
+            imageUrl = data.download_url;
+        }
+
+        const authorName = data.owner || data.username || data.author || 'instagram_user';
 
         if (imageUrl) {
             return new Response(JSON.stringify({ 
