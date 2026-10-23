@@ -90,25 +90,25 @@
         }
         .preview-container {
             margin-top: 15px;
-            max-height: 220px;
+            max-height: 300px;
             overflow-y: auto;
             display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            justify-content: center;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
         }
         .preview-container img {
-            width: 70px;
-            height: 70px;
-            object-fit: cover;
-            border-radius: 6px;
+            width: 100%;
+            max-width: 280px;
+            border-radius: 8px;
             border: 1px solid #dcdfe6;
-            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
         }
         .tip {
-            font-size: 12px;
-            color: #909399;
-            margin-top: 8px;
+            font-size: 13px;
+            color: #e6a23c;
+            margin-top: 10px;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -130,7 +130,7 @@
         </div>
     </div>
 
-    <button class="submit-btn" id="downloadBtn">开始下载 / 解析</button>
+    <button class="submit-btn" id="downloadBtn">开始解析 / 下载</button>
     
     <div id="status"></div>
     <div class="tip" id="tipText"></div>
@@ -189,14 +189,12 @@
                 throw new Error(result.error || '未找到图片');
             }
 
-            let index = 1;
-
-            // 电脑端且选择了文件夹：执行自动批量写入本地文件夹
+            // 电脑端且已选择本地文件夹：继续使用批量写入
             if (isDirectoryPickerSupported && dirHandle) {
                 statusEl.innerText = `解析成功，正在下载 ${result.imageUrls.length} 张图片到本地...`;
-                
                 const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
 
+                let index = 1;
                 for (let imgUrl of result.imageUrls) {
                     const proxyUrl = `/api/proxy?url=${encodeURIComponent(imgUrl)}`;
                     const imgRes = await fetch(proxyUrl);
@@ -219,10 +217,10 @@
                 statusEl.innerText = `下载成功！共保存 ${result.imageUrls.length} 张图片到 "${result.authorName}" 文件夹。`;
 
             } else {
-                // 手机端 / 不支持的浏览器：直接渲染代理图片，支持长按保存到相册
+                // 手机端 / 不支持文件夹的浏览器：直接安全渲染代理图片，长按即可保存到相册
                 statusEl.className = 'success';
                 statusEl.innerText = `解析成功！共找到 ${result.imageUrls.length} 张图片。`;
-                tipText.innerText = '💡 手机端提示：请直接长按下方预览图片，选择“添加到照片”保存到相册。';
+                tipText.innerText = '👉 手机操作提示：请直接长按下方图片，选择“添加到照片”即可保存到相册！';
 
                 for (let imgUrl of result.imageUrls) {
                     const proxyUrl = `/api/proxy?url=${encodeURIComponent(imgUrl)}`;
@@ -230,7 +228,6 @@
                     const imgTag = document.createElement('img');
                     imgTag.src = proxyUrl;
                     previewContainer.appendChild(imgTag);
-                    index++;
                 }
             }
 
