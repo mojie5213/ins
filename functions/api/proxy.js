@@ -17,11 +17,11 @@ export async function onRequestGet(context) {
             return new Response(`上游图片响应失败: ${imageRes.status}`, { status: 500 });
         }
 
-        // 【关键修复】使用 arrayBuffer 替代直接返回 stream，彻底解决 iOS Safari 读取流失败的问题
         const buffer = await imageRes.arrayBuffer();
 
         const responseHeaders = new Headers(imageRes.headers);
         responseHeaders.set('Access-Control-Allow-Origin', '*');
+        responseHeaders.set('Content-Type', 'image/jpeg');
 
         return new Response(buffer, {
             status: imageRes.status,
