@@ -35,20 +35,20 @@ export async function onRequestGet(context) {
 
         const data = await apiRes.json();
         
-        // 精准匹配当前 API 返回的 JSON 结构：从数组 media 中获取第一个元素的 url
-        let imageUrl = '';
-        if (data.media && Array.isArray(data.media) && data.media.length > 0) {
-            imageUrl = data.media[0].url || data.media[0].thumbnail;
+        // 提取所有的图片直链到一个数组中
+        let imageUrls = [];
+        if (data.media && Array.isArray(data.media)) {
+            imageUrls = data.media.map(item => item.url || item.thumbnail).filter(Boolean);
         } else if (data.url) {
-            imageUrl = data.url;
+            imageUrls = [data.url];
         }
 
         const authorName = data.owner || data.username || data.author || 'instagram_user';
 
-        if (imageUrl) {
+        if (imageUrls.length > 0) {
             return new Response(JSON.stringify({ 
                 success: true, 
-                imageUrl: imageUrl,
+                imageUrls: imageUrls, // 返回多图数组
                 authorName: authorName
             }), {
                 headers: { 'Content-Type': 'application/json' }
