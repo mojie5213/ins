@@ -17,7 +17,7 @@ export async function onRequestGet(context) {
 
     try {
         const apiHost = 'instagram-downloader-download-instagram-stories-videos4.p.rapidapi.com';
-        const apiPath = '/convert'; // 确认使用 /convert 路径
+        const apiPath = '/convert';
         const apiRequestUrl = `https://${apiHost}${apiPath}?url=${encodeURIComponent(targetUrl)}`;
 
         const apiRes = await fetch(apiRequestUrl, {
@@ -30,19 +30,17 @@ export async function onRequestGet(context) {
 
         if (!apiRes.ok) {
             const errText = await apiRes.text();
-            throw new Error(`API 拒绝响应 (状态码 ${apiRes.status}): ${errText}`);
+            throw new Error(`API 响应错误 (${apiRes.status}): ${errText}`);
         }
 
         const data = await apiRes.json();
         
-        // 兼容处理该 API 的返回格式
+        // 精准匹配当前 API 返回的 JSON 结构：从数组 media 中获取第一个元素的 url
         let imageUrl = '';
         if (data.media && Array.isArray(data.media) && data.media.length > 0) {
-            imageUrl = data.media[0].u || data.media[0].th;
+            imageUrl = data.media[0].url || data.media[0].thumbnail;
         } else if (data.url) {
             imageUrl = data.url;
-        } else if (data.download_url) {
-            imageUrl = data.download_url;
         }
 
         const authorName = data.owner || data.username || data.author || 'instagram_user';
@@ -56,7 +54,7 @@ export async function onRequestGet(context) {
                 headers: { 'Content-Type': 'application/json' }
             });
         } else {
-            return new Response(JSON.stringify({ success: false, error: `未找到图片，返回数据: ${JSON.stringify(data)}` }), {
+            return new Response(JSON.stringify({ success: false, error: `未找到图片直链` }), {
                 headers: { 'Content-Type': 'application/json' }
             });
         }
