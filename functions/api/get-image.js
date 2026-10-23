@@ -38,19 +38,23 @@ export async function onRequestGet(context) {
         const data = await apiRes.json();
         
         let imageUrls = [];
-        
-        // 兼容所有可能的字段组合（兼容图片数组、单图url、视频url等）
         if (data.media && Array.isArray(data.media)) {
             imageUrls = data.media.map(item => item.url || item.thumbnail || item.u || item.th).filter(Boolean);
         } else if (data.url) {
             imageUrls = [data.url];
         } else if (data.download_url) {
             imageUrls = [data.download_url];
-        } else if (data.video_url) {
-            imageUrls = [data.video_url];
         }
 
-        const authorName = data.owner || data.username || data.author || 'instagram_user';
+        // 1. 尝试从链接中提取 Instagram 帖子的唯一短码 (例如 DeuULbPE9q4) 作为保底文件夹名
+        let postCode = 'post';
+        const match = targetUrl.match(/\/p\/([a-zA-Z0-9_-]+)/) || targetUrl.match(/\/reel\/([a-zA-Z0-9_-]+)/);
+        if (match && match[1]) {
+            postCode = `ins_${match[1]}`;
+        }
+
+        // 2. 优先使用 API 返回的作者名，如果没有则使用提取出的帖子短码文件夹名
+        const authorName = data.owner || data.username || data.author || postCode;
 
         if (imageUrls.length > 0) {
             return new Response(JSON.stringify({ 
@@ -61,8 +65,7 @@ export async function onRequestGet(context) {
                 headers: { 'Content-Type': 'application/json' }
             });
         } else {
-            // 如果还是找不到，把返回的 JSON 完整打印出来方便排查
-            return new Response(JSON.stringify({ success: false, error: `未找到媒体直链，返回内容: ${JSON.stringify(data)}` }), {
+            return new Response(JSON.stringify({ success: false, error: `未找到媒体直链` }), {
                 headers: { 'Content-Type': 'application/json' }
             });
         }
