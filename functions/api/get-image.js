@@ -1,7 +1,7 @@
 export async function onRequestGet(context) {
     const url = new URL(context.request.url);
     const targetUrl = url.searchParams.get('url');
-    const rapidApiKey = context.env.RAPIDAPI_KEY; // 从 Cloudflare 环境变量获取密钥
+    const rapidApiKey = context.env.RAPIDAPI_KEY;
 
     if (!targetUrl) {
         return new Response(JSON.stringify({ success: false, error: '缺少目标链接' }), {
@@ -16,9 +16,9 @@ export async function onRequestGet(context) {
     }
 
     try {
-        // 以 RapidAPI 某主流 Instagram 下载接口为例（请根据你实际订阅的 API 文档调整请求头和 URL）
-        const apiHost = 'instagram-downloader-download-instagram-videos-stories.p.rapidapi.com'; // 示例 Host
-        const apiRequestUrl = `https://${apiHost}/index?url=${encodeURIComponent(targetUrl)}`;
+        // 使用你在 RapidAPI 上找到的正确 Host
+        const apiHost = 'instagram-downloader-download-instagram-stories-videos4.p.rapidapi.com';
+        const apiRequestUrl = `https://${apiHost}/?url=${encodeURIComponent(targetUrl)}`;
 
         const apiRes = await fetch(apiRequestUrl, {
             method: 'GET',
@@ -34,8 +34,8 @@ export async function onRequestGet(context) {
 
         const data = await apiRes.json();
         
-        // 兼容处理：获取解析出的图片直链和作者名（不同 API 返回格式略有不同，按需调整）
-        const imageUrl = data.media || data.imageUrl || (data.data && data.data[0]);
+        // 兼容处理该接口常见的返回字段
+        const imageUrl = data.url || data.media || data.imageUrl || (data.data && data.data[0]);
         const authorName = data.owner || data.username || 'instagram_user';
 
         if (imageUrl) {
