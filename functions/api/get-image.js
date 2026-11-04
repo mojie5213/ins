@@ -8,57 +8,49 @@ export async function onRequestGet(context) {
         });
     }
 
-    try {
-        let imageUrls = [];
+    // 已填入你的真实 RapidAPI Key
+    const RAPID_API_KEY = 'c0d1ab2c0mshb4a51333f13f661p115c8ajsn564f93e255cf'; 
 
-        // 使用稳定公开的无Key解析代理接口获取多图数组
-        const response = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`, {
+    try {
+        const apiRes = await fetch(`https://instagram-scraper-api2.p.rapidapi.com/v1/post_info?url_or_shortcode=${encodeURIComponent(postUrl)}`, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'x-rapidapi-key': RAPID_API_KEY,
+                'x-rapidapi-host': 'instagram-scraper-api2.p.rapidapi.com'
             }
         });
 
-        const data = await response.json();
-        
-        if (data && data.status && data.result) {
-            // 兼容不同的返回结构
-            const items = Array.isArray(data.result) ? data.result : [data.result];
-            for (let item of items) {
-                if (item.url) imageUrls.push(item.url);
-                if (item.images && Array.isArray(item.images)) {
-                    imageUrls.push(...item.images);
+        const data = await apiRes.json();
+        let imageUrls = [];
+        let authorName = 'Instagram_Media';
+
+        if (data && data.data) {
+            const post = data.data;
+            if (post.owner && post.owner.username) {
+                authorName = post.owner.username;
+            }
+
+            // 多图轮播 (sidecar) 提取
+            if (post.carousel_media && Array.isArray(post.carousel_media)) {
+                for (let item of post.carousel_media) {
+                    const imgUrl = item.image_versions2?.candidates?.[0]?.url || item.url;
+                    if (imgUrl) imageUrls.push(imgUrl);
                 }
-            }
-        }
-
-        // 备用通道：如果上一个接口没返回，尝试通过公共无限制解析接口
-        if (imageUrls.length === 0) {
-            const altRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-            const altData = await altRes.json();
-            if (altData && altData.urls && Array.isArray(altData.urls)) {
-                imageUrls = altData.urls;
-            }
-        }
-
-        // 最终兜底：如果外部接口都挂了，退化为抓取第一张
-        if (imageUrls.length === 0) {
-            const pageRes = await fetch(postUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15' }
-            });
-            const html = await pageRes.text();
-            const match = html.match(/<meta property="og:image" content="([^"]+)"/);
-            if (match && match[1]) {
-                imageUrls.push(match[1].replace(/&amp;/g, '&'));
+            } 
+            // 单图提取
+            else if (post.image_versions2?.candidates?.[0]?.url) {
+                imageUrls.push(post.image_versions2.candidates[0].url);
+            } else if (post.url) {
+                imageUrls.push(post.url);
             }
         }
 
         if (imageUrls.length === 0) {
-            throw new Error('未找到图片，请确保链接正确且为公开帖子');
+            throw new Error('未解析到图片，请检查链接或确保 API 额度正常');
         }
 
         return new Response(JSON.stringify({
             success: true,
-            authorName: 'Instagram_Media',
+            authorName: authorName,
             imageUrls: imageUrls
         }), {
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
