@@ -14,45 +14,43 @@ export async function onRequestGet(context) {
         }
 
         let imageUrls = [];
-        let authorName = 'Instagram_User';
+        let authorName = 'Instagram_Media';
 
-        // 使用高可用、专门针对 Cloudflare 优化的公开解析通道
-        const targetApi = `https://instagram-dl.chinup.workers.dev/?url=${encodeURIComponent(postUrl)}`;
-        
-        try {
-            const apiRes = await fetch(targetApi, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-            });
-            if (apiRes.ok) {
-                const data = await apiRes.json();
-                if (data) {
-                    if (data.author) authorName = data.author;
-                    if (data.username) authorName = data.username;
-                    if (Array.isArray(data.urls)) imageUrls.push(...data.urls);
-                    if (data.url) imageUrls.push(data.url);
-                    if (Array.isArray(data.images)) imageUrls.push(...data.images);
-                }
-            }
-        } catch (e) {}
+        // 尝试使用目前稳定的备用解析源
+        const endpoints = [
+            `https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`,
+            `https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`
+        ];
 
-        // 备用通道
-        if (imageUrls.length === 0) {
+        for (const endpoint of endpoints) {
             try {
-                const altRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-                if (altRes.ok) {
-                    const altData = await altRes.json();
-                    if (altData) {
-                        if (altData.author) authorName = altData.author;
-                        if (Array.isArray(altData.urls)) imageUrls.push(...altData.urls);
+                const res = await fetch(endpoint, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    console.log('API Response:', data); // 会记录在 Cloudflare Workers 日志中
+                    
+                    if (data) {
+                        if (data.author) authorName = data.author;
+                        if (data.username) authorName = data.username;
+                        if (data.result && data.result.author) authorName = data.result.author;
+
+                        if (Array.isArray(data.urls)) imageUrls.push(...data.urls);
+                        if (data.url) imageUrls.push(data.url);
+                        if (data.result && Array.isArray(data.result.images)) imageUrls.push(...data.result.images);
                     }
                 }
-            } catch (e) {}
+            } catch (err) {
+                console.error('Fetch error:', err);
+            }
+            if (imageUrls.length > 0) break;
         }
 
         imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http'));
 
         if (imageUrls.length === 0) {
-            return new Response(JSON.stringify({ success: false, error: '未能解析到图片，请确认该帖子为公开状态' }), {
+            return new Response(JSON.stringify({ success: false, error: '所有解析通道均被拦截，请确保帖子为公开状态' }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
         }
