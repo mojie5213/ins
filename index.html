@@ -61,70 +61,44 @@
 
     <script>
         document.getElementById('downloadBtn').addEventListener('click', async () => {
-            let postUrl = document.getElementById('urlInput').value.trim();
+            const urlInput = document.getElementById('urlInput').value.trim();
             const statusEl = document.getElementById('statusEl');
             
-            if (!postUrl) {
+            if (!urlInput) {
                 statusEl.innerText = '请输入 Instagram 链接';
                 return;
             }
 
-            if (postUrl.includes('?')) {
-                postUrl = postUrl.split('?')[0];
-            }
-
-            statusEl.innerText = '正在多通道解析中...';
+            statusEl.innerText = '正在通过后端解析中...';
 
             try {
-                let imageUrls = [];
-                let authorName = 'Instagram_Media';
+                // 1. 请求我们自己的后端 API（绝无跨域问题）
+                const response = await fetch(`/api/get-image?url=${encodeURIComponent(urlInput)}`);
+                const result = await response.json();
 
-                // 尝试通道 1
-                try {
-                    const res1 = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-                    if (res1.ok) {
-                        const data1 = await res1.json();
-                        if (data1.author) authorName = data1.author;
-                        if (data1.username) authorName = data1.username;
-                        if (Array.isArray(data1.urls)) imageUrls.push(...data1.urls);
-                        else if (data1.url) imageUrls.push(data1.url);
-                    }
-                } catch (e) {}
-
-                // 尝试通道 2
-                if (imageUrls.length === 0) {
-                    try {
-                        const res2 = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
-                        if (res2.ok) {
-                            const data2 = await res2.json();
-                            if (data2 && data2.result) {
-                                if (data2.result.author) authorName = data2.result.author;
-                                if (Array.isArray(data2.result.images)) imageUrls.push(...data2.result.images);
-                            }
-                        }
-                    } catch (e) {}
-                }
-
-                imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http'));
-
-                if (imageUrls.length === 0) {
-                    statusEl.innerText = '解析失败：当前公开接口均被拦截。请确认该帖子为公开状态，或者更换一个链接测试。';
+                if (!result.success) {
+                    statusEl.innerText = `处理失败: ${result.error}`;
                     return;
                 }
 
-                const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim() || 'Instagram_Media';
-                statusEl.innerText = `解析成功！找到 ${imageUrls.length} 张图片，请选择保存文件夹...`;
+                statusEl.innerText = `解析成功！共找到 ${result.imageUrls.length} 张图片，请选择保存文件夹...`;
 
+                // 2. 检查浏览器是否支持本地文件夹写入 API
                 if (!window.showDirectoryPicker) {
-                    statusEl.innerText = '当前浏览器不支持本地文件夹写入，请使用电脑端 Chrome 或 Edge 正常窗口。';
+                    statusEl.innerText = '当前浏览器不支持本地文件夹写入，请使用电脑端 Chrome 或 Edge。';
                     return;
                 }
 
+                // 3. 弹出系统文件夹选择框
                 const dirHandle = await window.showDirectoryPicker();
-                const authorFolderHandle = await dirHandle.getDirectoryHandle(safeAuthorName, { create: true });
 
+                // 4. 自动以博主名字新建文件夹
+                statusEl.innerText = `正在创建文件夹 "${result.authorName}" 并下载...`;
+                const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
+
+                // 5. 循环批量下载图片并写入该文件夹
                 let count = 0;
-                for (let imgUrl of imageUrls) {
+                for (let imgUrl of result.imageUrls) {
                     try {
                         const imgRes = await fetch(imgUrl);
                         if (!imgRes.ok) continue;
@@ -136,12 +110,12 @@
                         await writable.write(blob);
                         await writable.close();
                         count++;
-                    } catch (err) {
-                        console.error('单张保存失败:', err);
+                    } catch (e) {
+                        console.error('单张图片下载失败:', e);
                     }
                 }
 
-                statusEl.innerText = `下载成功！共成功保存 ${count}/${imageUrls.length} 张图片到 "${safeAuthorName}" 文件夹。`;
+                statusEl.innerText = `下载成功！共成功保存 ${count}/${result.imageUrls.length} 张图片到 "${result.authorName}" 文件夹。`;
 
             } catch (err) {
                 if (err.name === 'AbortError') {
