@@ -17,29 +17,34 @@ export async function onRequestGet(context) {
         }
 
         let imageUrls = [];
-        let authorName = 'Instagram_Media';
+        let authorName = '';
 
-        // 1. 抓取嵌入页
+        // 核心：抓取 Instagram 官方公开的 embed 页面
         const embedUrl = postUrl + 'embed/captioned/';
         const res = await fetch(embedUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             }
         });
 
         if (res.ok) {
             const html = await res.text();
             
-            // 精准提取博主用户名
-            const ownerMatch = html.match(/"owner":\s*\{[^}]*"username":\s*"([^"]+)"/);
-            if (ownerMatch && ownerMatch[1]) {
-                authorName = ownerMatch[1];
-            } else {
-                const authorMatchAlt = html.match(/"username":\s*"([^"]+)"/);
-                if (authorMatchAlt && authorMatchAlt[1]) authorName = authorMatchAlt[1];
+            // 1. 精准匹配博主用户名（尝试多种常见 JSON 结构）
+            const ownerMatch1 = html.match(/"owner":\s*\{[^}]*"username":\s*"([^"]+)"/);
+            const ownerMatch2 = html.match(/"username":\s*"([^"]+)"/);
+            const ownerMatch3 = html.match(/class="[^"]*Algscalable[^"]*"[^>]*>@([a-zA-Z0-9._]+)/);
+            
+            if (ownerMatch1 && ownerMatch1[1]) {
+                authorName = ownerMatch1[1];
+            } else if (ownerMatch2 && ownerMatch2[1]) {
+                authorName = ownerMatch2[1];
+            } else if (ownerMatch3 && ownerMatch3[1]) {
+                authorName = ownerMatch3[1];
             }
 
-            // 提取所有高清图片链接（支持多图轮播的侧滑图片）
+            // 2. 提取页面中所有合法的 cdninstagram 高清图片链接
             const regex = /https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g;
             const matches = html.match(regex);
             if (matches) {
@@ -47,25 +52,7 @@ export async function onRequestGet(context) {
             }
         }
 
-        // 2. 如果图片少于 6 张，尝试通过第三方高可用镜像源补全多图数组
-        if (imageUrls.length < 6) {
-            try {
-                const altRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-                if (altRes.ok) {
-                    const altData = await altRes.json();
-                    if (altData) {
-                        if (altData.author || altData.username) {
-                            authorName = altData.author || altData.username;
-                        }
-                        if (Array.isArray(altData.urls)) {
-                            imageUrls.push(...altData.urls);
-                        }
-                    }
-                }
-            } catch (e) {}
-        }
-
-        // 清洗去重：过滤掉缩略图，只留原图/大图
+        // 清洗去重：过滤掉重复项、小缩略图和水印图
         imageUrls = imageUrls.map(u => u.replace(/&amp;/g, '&').replace(/u0026/g, '&'));
         imageUrls = [...new Set(imageUrls)].filter(u => 
             typeof u === 'string' && 
@@ -81,7 +68,12 @@ export async function onRequestGet(context) {
             });
         }
 
-        const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim() || 'Instagram_Media';
+        // 如果实在没匹配到用户名，用链接里的特征或时间戳代替，绝不使用死板的固定名
+        if (!authorName) {
+            authorName = 'IG_User_' + Date.now().toString().slice(-4);
+        }
+
+        const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim();
 
         return new Response(JSON.stringify({
             success: true,
