@@ -19,31 +19,7 @@ export async function onRequestGet(context) {
         let imageUrls = [];
         let authorName = '';
 
-        // 通道 1：深度抓取 Instagram 官方嵌入页的完整 HTML（包含多图轮播的所有 CDN 原图）
-        try {
-            const embedRes = await fetch(postUrl + 'embed/captioned/', {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                }
-            });
-            if (embedRes.ok) {
-                const html = await embedRes.text();
-                
-                // 提取真实博主名
-                const ownerMatch = html.match(/"owner":\s*\{[^}]*"username":\s*"([^"]+)"/);
-                if (ownerMatch && ownerMatch[1]) authorName = ownerMatch[1];
-
-                // 穷举页面中出现的所有 cdninstagram 高清图片和视频封面链接
-                const regex = /https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g;
-                const matches = html.match(regex);
-                if (matches) {
-                    imageUrls.push(...matches);
-                }
-            }
-        } catch (e) {}
-
-        // 通道 2：同时请求公开解析接口作为多图补充，防止部分帖子结构特殊
+        // 通道 1：调用稳定解析接口获取完整的多图数组
         try {
             const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
             if (apiRes.ok) {
@@ -56,15 +32,46 @@ export async function onRequestGet(context) {
             }
         } catch (e) {}
 
-        // 终极清洗去重：排除所有小头像、缩略图，只保留最大尺寸的原图
+        // 通道 2：备用全网高可用解析接口
+        if (imageUrls.length < 4) {
+            try {
+                const altRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
+                if (altRes.ok) {
+                    const altData = await altRes.json();
+                    if (altData && altData.result) {
+                        if (altData.result.author) authorName = altData.result.author;
+                        if (Array.isArray(altData.result.images)) {
+                            imageUrls.push(...altData.result.images);
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // 通道 3：抓取官方 embed 页面补充静态图片链接
+        try {
+            const embedRes = await fetch(postUrl + 'embed/captioned/', {
+                headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)' }
+            });
+            if (embedRes.ok) {
+                const html = await embedRes.text();
+                const ownerMatch = html.match(/"owner":\s*\{[^}]*"username":\s*"([^"]+)"/);
+                if (ownerMatch && ownerMatch[1]) authorName = ownerMatch[1];
+
+                const regex = /https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g;
+                const matches = html.match(regex);
+                if (matches) imageUrls.push(...matches);
+            }
+        } catch (e) {}
+
+        // 清洗去重：过滤小图和视频封面，保留所有高清大图
         imageUrls = imageUrls.map(u => u.replace(/&amp;/g, '&').replace(/u0026/g, '&'));
         imageUrls = [...new Set(imageUrls)].filter(u => 
             typeof u === 'string' && 
             u.startsWith('http') && 
             !u.includes('s150x150') && 
             !u.includes('320x320') &&
-            !u.includes('480x480') &&
-            !u.includes('p150x150')
+            !u.includes('480x480')
         );
 
         if (imageUrls.length === 0) {
@@ -73,9 +80,8 @@ export async function onRequestGet(context) {
             });
         }
 
-        // 确保博主名称有效，有则用真名，无则安全生成
         if (!authorName) {
-            authorName = 'IG_User_' + Date.now().toString().slice(-5);
+            authorName = 'IG_Creator_' + Date.now().toString().slice(-5);
         }
         const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim();
 
