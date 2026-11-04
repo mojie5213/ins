@@ -10,49 +10,45 @@ export async function onRequestGet(context) {
 
     try {
         let imageUrls = [];
-        let authorName = 'Instagram_Media';
 
-        // 尝试通道 1：使用公开的 SnapInsta 兼容解析通道
-        try {
-            const res = await fetch(`https://api.alligato.com/v1/instagram?url=${encodeURIComponent(postUrl)}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-            });
-            const data = await res.json();
-            if (data && data.images && Array.isArray(data.images)) {
-                imageUrls = data.images;
+        // 使用稳定公开的无Key解析代理接口获取多图数组
+        const response = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
-        } catch (e) {
-            console.warn('通道 1 解析失败，切换备用通道');
+        });
+
+        const data = await response.json();
+        
+        if (data && data.status && data.result) {
+            // 兼容不同的返回结构
+            const items = Array.isArray(data.result) ? data.result : [data.result];
+            for (let item of items) {
+                if (item.url) imageUrls.push(item.url);
+                if (item.images && Array.isArray(item.images)) {
+                    imageUrls.push(...item.images);
+                }
+            }
         }
 
-        // 如果通道 1 未获取到多图，使用强大的嵌入式页面和多重正则深度提取
+        // 备用通道：如果上一个接口没返回，尝试通过公共无限制解析接口
         if (imageUrls.length === 0) {
-            const cleanUrl = postUrl.split('?')[0];
-            const embedRes = await fetch(`${cleanUrl}embed/captioned/`, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
-                }
-            });
-            const html = await embedRes.text();
-
-            // 深度匹配页面中所有高清晰度的图片链接
-            const matches = html.matchAll(/class="EmbeddedMediaImage"[^>]+src="([^"]+)"/g);
-            for (const match of matches) {
-                const decoded = match[1].replace(/&amp;/g, '&');
-                if (!imageUrls.includes(decoded)) {
-                    imageUrls.push(decoded);
-                }
+            const altRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
+            const altData = await altRes.json();
+            if (altData && altData.urls && Array.isArray(altData.urls)) {
+                imageUrls = altData.urls;
             }
+        }
 
-            // 兜底：如果 embed 没抓到，匹配标准的 og:image
-            if (imageUrls.length === 0) {
-                const ogMatches = html.matchAll(/<meta property="og:image" content="([^"]+)"/g);
-                for (const match of ogMatches) {
-                    const decoded = match[1].replace(/&amp;/g, '&');
-                    if (!imageUrls.includes(decoded)) {
-                        imageUrls.push(decoded);
-                    }
-                }
+        // 最终兜底：如果外部接口都挂了，退化为抓取第一张
+        if (imageUrls.length === 0) {
+            const pageRes = await fetch(postUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15' }
+            });
+            const html = await pageRes.text();
+            const match = html.match(/<meta property="og:image" content="([^"]+)"/);
+            if (match && match[1]) {
+                imageUrls.push(match[1].replace(/&amp;/g, '&'));
             }
         }
 
@@ -62,7 +58,7 @@ export async function onRequestGet(context) {
 
         return new Response(JSON.stringify({
             success: true,
-            authorName: authorName,
+            authorName: 'Instagram_Media',
             imageUrls: imageUrls
         }), {
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
