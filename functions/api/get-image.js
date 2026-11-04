@@ -15,59 +15,51 @@ export async function onRequestGet(context) {
         }
 
         let imageUrls = [];
-        let authorName = 'Instagram_Media';
+        let authorName = 'Instagram_User';
 
-        // 使用稳定支持多图和博主名称的公开解析接口
-        const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-        
+        // 使用目前对多图支持最好、最精准的稳定解析通道
+        const apiRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+
         if (apiRes.ok) {
-            const data = await apiRes.json();
-            
-            // 提取博主名
-            if (data && data.author) {
-                authorName = data.author;
-            } else if (data && data.username) {
-                authorName = data.username;
-            }
+            const textBody = await apiRes.text();
+            try {
+                const data = JSON.parse(textBody);
+                if (data && data.status && data.result) {
+                    // 1. 精准提取博主真实名字
+                    if (data.result.author) {
+                        authorName = data.result.author;
+                    } else if (data.result.username) {
+                        authorName = data.result.username;
+                    }
 
-            // 提取多张图片链接
-            if (data && Array.isArray(data.urls) && data.urls.length > 0) {
-                imageUrls.push(...data.urls);
-            } else if (data && data.url) {
-                imageUrls.push(data.url);
-            }
+                    // 2. 精准提取多图数组
+                    if (Array.isArray(data.result.images) && data.result.images.length > 0) {
+                        imageUrls.push(...data.result.images);
+                    } else if (data.result.url) {
+                        imageUrls.push(data.result.url);
+                    }
+                }
+            } catch (e) {}
         }
 
-        // 备用通道：如果上面没取到多图，尝试通用解析通道
+        // 备用兜底通道：如果主通道没拿到，使用备用接口
         if (imageUrls.length === 0) {
-            const altRes = await fetch(`https://instagramapi.io/v1/details?url=${encodeURIComponent(postUrl)}`);
+            const altRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
             if (altRes.ok) {
                 const altData = await altRes.json();
                 if (altData && altData.author) authorName = altData.author;
-                if (altData && Array.isArray(altData.images)) {
-                    imageUrls.push(...altData.images);
+                if (altData && Array.isArray(altData.urls)) {
+                    imageUrls.push(...altData.urls);
                 }
             }
         }
 
-        // 兜底：如果还是只有1张，尝试从主页抓取
-        if (imageUrls.length === 0) {
-            const embedRes = await fetch(postUrl + (postUrl.endsWith('/') ? '' : '/') + 'embed/captioned/', {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15'
-                }
-            });
-            if (embedRes.ok) {
-                const html = await embedRes.text();
-                const cdnMatches = html.match(/https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g);
-                if (cdnMatches) {
-                    imageUrls.push(...cdnMatches);
-                }
-            }
-        }
-
-        // 数组去重并过滤
-        imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http'));
+        // 严格去重并过滤出合法的 CDN 图片直链
+        imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http') && (u.includes('cdninstagram.com') || u.includes('fbcdn.net') || u.includes('scontent')));
 
         if (imageUrls.length === 0) {
             return new Response(JSON.stringify({ success: false, error: '未能解析到图片，请确认该帖子为公开状态' }), {
@@ -75,9 +67,12 @@ export async function onRequestGet(context) {
             });
         }
 
+        // 过滤博主名中的非法文件夹字符（保留中英文、数字、下划线）
+        const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim() || 'Instagram_Media';
+
         return new Response(JSON.stringify({
             success: true,
-            authorName: authorName.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, '_'), // 过滤非法文件夹字符
+            authorName: safeAuthorName,
             imageUrls: imageUrls
         }), {
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
