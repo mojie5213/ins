@@ -19,8 +19,8 @@
             padding: 30px;
             border-radius: 12px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            width: 450px;
-            max-width: 90%;
+            width: 500px; /* 稍微加宽卡片，容纳长链接 */
+            max-width: 92%;
             text-align: center;
         }
         h2 {
@@ -41,13 +41,15 @@
             display: flex;
             gap: 8px;
         }
+        /* 将输入框改造成 100% 宽度，并优化样式 */
         input[type="text"] {
-            flex: 1;
-            padding: 10px 12px;
+            width: 100%;
+            padding: 12px;
             border: 1px solid #ccc;
             border-radius: 6px;
             font-size: 14px;
             outline: none;
+            box-sizing: border-box;
         }
         input[type="text"]:focus {
             border-color: #409eff;
@@ -90,7 +92,7 @@
             font-weight: bold;
             cursor: pointer;
             margin-top: 10px;
-            display: none; /* 默认隐藏 */
+            display: none;
         }
         .share-btn:hover {
             background-color: #66b1ff;
@@ -135,13 +137,14 @@
     
     <div class="form-group">
         <label>Instagram 帖子链接:</label>
-        <input type="text" id="urlInput" placeholder="请输入 Instagram 链接...">
+        <!-- 加长并优化后的输入框 -->
+        <input type="text" id="urlInput" placeholder="请粘贴完整的 Instagram 帖子链接 (带 /p/...)">
     </div>
 
     <div class="form-group" id="folderGroup">
         <label>保存文件夹 (仅电脑端支持):</label>
         <div class="input-row">
-            <input type="text" id="folderInput" readonly placeholder="请点击右侧按钮选择文件夹">
+            <input type="text" id="folderInput" readonly placeholder="请点击右侧按钮选择文件夹" style="flex:1;">
             <button class="browse-btn" id="selectDirBtn">浏览...</button>
         </div>
     </div>
@@ -211,7 +214,8 @@
             }
 
             if (isDirectoryPickerSupported && dirHandle) {
-                statusEl.innerText = `解析成功，正在下载 ${result.imageUrls.length} 张图片到本地...`;
+                status_text = `解析成功，正在下载 ${result.imageUrls.length} 张图片到本地...`;
+                statusEl.innerText = status_text;
                 const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
 
                 let index = 1;
@@ -258,7 +262,6 @@
                 statusEl.className = 'success';
                 statusEl.innerText = `准备就绪！共获取 ${cachedFiles.length} 张图片。`;
                 
-                // 【修改点】不管三七二十一，在手机端强制显示蓝色的一键保存按钮
                 shareBtn.style.display = 'block';
                 tipText.innerText = '💡 请点击下方蓝色按钮，尝试一键保存所有图片到相册！';
             }
