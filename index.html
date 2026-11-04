@@ -69,10 +69,10 @@
                 return;
             }
 
-            statusEl.innerText = '正在通过后端解析中...';
+            statusEl.innerText = '正在解析全部图片...';
 
             try {
-                // 1. 请求后端获取解析结果
+                // 1. 请求后端获取图片列表和博主名
                 const response = await fetch(`/api/get-image?url=${encodeURIComponent(urlInput)}`);
                 const result = await response.json();
 
@@ -83,7 +83,7 @@
 
                 statusEl.innerText = `解析成功！共找到 ${result.imageUrls.length} 张图片，请选择保存文件夹...`;
 
-                // 2. 检查浏览器文件夹写入支持
+                // 2. 检查浏览器文件夹写入 API
                 if (!window.showDirectoryPicker) {
                     statusEl.innerText = '当前浏览器不支持本地文件夹写入，请使用电脑端 Chrome 或 Edge。';
                     return;
@@ -92,22 +92,21 @@
                 // 3. 弹出系统文件夹选择框
                 const dirHandle = await window.showDirectoryPicker();
 
-                // 4. 自动以博主名字新建文件夹
-                statusEl.innerText = `正在创建文件夹 "${result.authorName}" 并下载...`;
+                // 4. 严格以后端解析出的博主名字创建子文件夹
+                statusEl.innerText = `正在创建博主文件夹 "${result.authorName}" 并下载...`;
                 const authorFolderHandle = await dirHandle.getDirectoryHandle(result.authorName, { create: true });
 
-                // 5. 循环下载图片（通过公开跨域代理绕过 403 限制）
+                // 5. 循环下载所有图片（通过图片代理绕过防盗链）
                 let count = 0;
                 for (let i = 0; i < result.imageUrls.length; i++) {
                     const imgUrl = result.imageUrls[i];
                     try {
-                        // 使用通用代理服务绕过 Instagram 的防盗链和跨域限制
                         const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(imgUrl)}`;
                         const imgRes = await fetch(proxyUrl);
                         if (!imgRes.ok) continue;
                         
                         const blob = await imgRes.blob();
-                        const fileName = `ins_${Date.now()}_${i + 1}.jpg`;
+                        const fileName = `${result.authorName}_${i + 1}.jpg`;
 
                         const fileHandle = await authorFolderHandle.getFileHandle(fileName, { create: true });
                         const writable = await fileHandle.createWritable();
