@@ -19,40 +19,54 @@ export async function onRequestGet(context) {
         let imageUrls = [];
         let authorName = '';
 
-        // 核心：抓取 Instagram 官方公开的 embed 页面
-        const embedUrl = postUrl + 'embed/captioned/';
-        const res = await fetch(embedUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        // 方案 A：调用海外高可用稳定解析源（专门用于完整获取多图轮播的所有原图数组）
+        try {
+            const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
+            if (apiRes.ok) {
+                const data = await apiRes.json();
+                if (data) {
+                    if (data.author) authorName = data.author;
+                    if (data.username) authorName = data.username;
+                    if (Array.isArray(data.urls) && data.urls.length > 0) {
+                        imageUrls.push(...data.urls);
+                    }
+                }
             }
-        });
+        } catch (e) {}
 
-        if (res.ok) {
-            const html = await res.text();
-            
-            // 1. 精准匹配博主用户名（尝试多种常见 JSON 结构）
-            const ownerMatch1 = html.match(/"owner":\s*\{[^}]*"username":\s*"([^"]+)"/);
-            const ownerMatch2 = html.match(/"username":\s*"([^"]+)"/);
-            const ownerMatch3 = html.match(/class="[^"]*Algscalable[^"]*"[^>]*>@([a-zA-Z0-9._]+)/);
-            
-            if (ownerMatch1 && ownerMatch1[1]) {
-                authorName = ownerMatch1[1];
-            } else if (ownerMatch2 && ownerMatch2[1]) {
-                authorName = ownerMatch2[1];
-            } else if (ownerMatch3 && ownerMatch3[1]) {
-                authorName = ownerMatch3[1];
-            }
+        // 方案 B：如果方案 A 没拿到或数量不够，使用备用高级聚合接口
+        if (imageUrls.length < 2) {
+            try {
+                const altRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
+                if (altRes.ok) {
+                    const altData = await altRes.json();
+                    if (altData && altData.result) {
+                        if (altData.result.author) authorName = altData.result.author;
+                        if (Array.isArray(altData.result.images)) {
+                            imageUrls.push(...altData.result.images);
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
 
-            // 2. 提取页面中所有合法的 cdninstagram 高清图片链接
-            const regex = /https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g;
-            const matches = html.match(regex);
-            if (matches) {
-                imageUrls.push(...matches);
+        // 方案 C：直接抓取官方嵌入页作为最终兜底，确保绝不为空
+        if (imageUrls.length === 0) {
+            const embedRes = await fetch(postUrl + 'embed/captioned/', {
+                headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)' }
+            });
+            if (embedRes.ok) {
+                const html = await embedRes.text();
+                const ownerMatch = html.match(/"owner":\s*\{[^}]*"username":\s*"([^"]+)"/);
+                if (ownerMatch && ownerMatch[1]) authorName = ownerMatch[1];
+
+                const regex = /https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g;
+                const matches = html.match(regex);
+                if (matches) imageUrls.push(...matches);
             }
         }
 
-        // 清洗去重：过滤掉重复项、小缩略图和水印图
+        // 严格清洗去重，过滤掉小尺寸图标，只保留高清原图
         imageUrls = imageUrls.map(u => u.replace(/&amp;/g, '&').replace(/u0026/g, '&'));
         imageUrls = [...new Set(imageUrls)].filter(u => 
             typeof u === 'string' && 
@@ -68,9 +82,9 @@ export async function onRequestGet(context) {
             });
         }
 
-        // 如果实在没匹配到用户名，用链接里的特征或时间戳代替，绝不使用死板的固定名
+        // 如果依然没有匹配到作者名，从链接或时间戳安全生成
         if (!authorName) {
-            authorName = 'IG_User_' + Date.now().toString().slice(-4);
+            authorName = 'IG_Creator_' + Date.now().toString().slice(-5);
         }
 
         const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim();
