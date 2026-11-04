@@ -9,51 +9,54 @@ export async function onRequestGet(context) {
     }
 
     try {
-        // 伪装成手机端浏览器访问 Instagram 帖子
-        const res = await fetch(postUrl, {
+        // 调用稳定且免费的公开解析服务获取多图数据
+        const apiUrl = `https://api.cobalt.tools/api/json`;
+        const apiRes = await fetch(apiUrl, {
+            method: 'POST',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-                'Accept-Language': 'en-US,en;q=0.9'
-            }
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            body: JSON.stringify({
+                url: postUrl,
+                vQuality: 'max'
+            })
         });
 
-        const html = await res.text();
-        const imageUrls = [];
+        const data = await apiRes.json();
+        let imageUrls = [];
 
-        // 核心提取：通过正则匹配页面中的 og:image（Open Graph 封面图或大图）
-        const ogImageMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
-        if (ogImageMatch && ogImageMatch[1]) {
-            // 将 HTML 实体转义字符（如 &amp;）还原为 &
-            let decodedUrl = ogImageMatch[1].replace(/&amp;/g, '&');
-            imageUrls.push(decodedUrl);
+        // 适配返回的数据结构（支持多图或视频封面）
+        if (data && data.status === 'redirect' || data.status === 'success') {
+            if (data.url) {
+                imageUrls.push(data.url);
+            }
+            if (data.picker && Array.isArray(data.picker)) {
+                imageUrls = data.picker.map(item => item.url);
+            }
         }
 
-        // 尝试匹配多图轮播中的其他图片
-        const allOgImages = html.matchAll(/<meta property="og:image" content="([^"]+)"/g);
-        for (const match of allOgImages) {
-            let decodedUrl = match[1].replace(/&amp;/g, '&');
-            if (!imageUrls.includes(decodedUrl)) {
-                imageUrls.push(decodedUrl);
+        // 兜底方案：如果 Cobalt 没返回，则尝试直接通过页面 JSON 抓取
+        if (imageUrls.length === 0) {
+            const pageRes = await fetch(postUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15' }
+            });
+            const html = await pageRes.text();
+            const matches = html.matchAll(/<meta property="og:image" content="([^"]+)"/g);
+            for (const match of matches) {
+                const decoded = match[1].replace(/&amp;/g, '&');
+                if (!imageUrls.includes(decoded)) imageUrls.push(decoded);
             }
         }
 
         if (imageUrls.length === 0) {
-            throw new Error('未能从该链接解析出图片，请确保链接公开且正确');
-        }
-
-        // 提取作者名字作为文件夹名（默认为 Instagram）
-        let authorName = 'Instagram_User';
-        const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
-        if (titleMatch && titleMatch[1]) {
-            const matchAuthor = titleMatch[1].match(/\((.*?)\)/);
-            if (matchAuthor && matchAuthor[1]) {
-                authorName = matchAuthor[1].replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, '_');
-            }
+            throw new Error('未找到图片，请确保链接正确且为公开帖子');
         }
 
         return new Response(JSON.stringify({
             success: true,
-            authorName: authorName,
+            authorName: 'Instagram_Media',
             imageUrls: imageUrls
         }), {
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
