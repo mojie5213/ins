@@ -9,24 +9,21 @@ export async function onRequestGet(context) {
             });
         }
 
-        let targetUrl = postUrl.trim();
-        if (!targetUrl.startsWith('http')) {
-            targetUrl = 'https://' + targetUrl;
-        }
+        const RAPID_API_KEY = 'c0d1ab2c0mshb4a51333f13f661p115c8ajsn564f93e255cf'; 
 
-        // 使用稳定、免费且支持多图的公开解析接口
-        const apiRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(targetUrl)}`, {
+        const apiRes = await fetch(`https://instagram-downloader-download-instagram-stories-videos1.p.rapidapi.com/index?url=${encodeURIComponent(postUrl)}`, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'x-rapidapi-key': RAPID_API_KEY,
+                'x-rapidapi-host': 'instagram-downloader-download-instagram-stories-videos1.p.rapidapi.com'
             }
         });
 
         const textBody = await apiRes.text();
-        let data;
+        let json;
         try {
-            data = JSON.parse(textBody);
+            json = JSON.parse(textBody);
         } catch (e) {
-            return new Response(JSON.stringify({ success: false, error: `解析服务响应异常` }), {
+            return new Response(JSON.stringify({ success: false, error: `API 返回异常` }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
         }
@@ -34,29 +31,26 @@ export async function onRequestGet(context) {
         let imageUrls = [];
         let authorName = 'Instagram_Media';
 
-        if (data && data.status && data.result) {
-            const resData = data.result;
-            if (resData.author) authorName = resData.author;
-
-            // 提取多图或单图
-            if (Array.isArray(resData.images)) {
-                imageUrls.push(...resData.images);
-            } else if (resData.url) {
-                imageUrls.push(resData.url);
-            }
-        }
-
-        // 备用兜底通道
-        if (imageUrls.length === 0) {
-            const altRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(targetUrl)}`);
-            const altData = await altRes.json();
-            if (altData && Array.isArray(altData.urls)) {
-                imageUrls.push(...altData.urls);
+        // 完美匹配你截图中的返回结构：data 是一个直达图片链接的数组
+        const rawData = json.data || json.result || json;
+        if (Array.isArray(rawData)) {
+            for (let item of rawData) {
+                // 如果 item 本身就是链接字符串
+                if (typeof item === 'string' && item.startsWith('http')) {
+                    imageUrls.push(item);
+                } 
+                // 如果 item 是对象，尝试提取里面的 url 字段
+                else if (item && typeof item === 'object') {
+                    const link = item.url || item.download_url || item.thumbnail;
+                    if (typeof link === 'string' && link.startsWith('http')) {
+                        imageUrls.push(link);
+                    }
+                }
             }
         }
 
         if (imageUrls.length === 0) {
-            return new Response(JSON.stringify({ success: false, error: '未解析到图片，请确保链接为公开的具体帖子（带 /p/）' }), {
+            return new Response(JSON.stringify({ success: false, error: '未解析到图片链接' }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
         }
