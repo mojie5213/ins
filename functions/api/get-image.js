@@ -17,7 +17,7 @@ export async function onRequestGet(context) {
         let imageUrls = [];
         let authorName = 'Instagram_User';
 
-        // 使用目前海外最稳定的公开多图解析通道
+        // 使用稳定公开的解析通道
         const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
         
         if (apiRes.ok) {
@@ -38,7 +38,7 @@ export async function onRequestGet(context) {
             }
         }
 
-        // 备用通道 2
+        // 备用兜底通道
         if (imageUrls.length === 0) {
             const altRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
             if (altRes.ok) {
@@ -52,7 +52,7 @@ export async function onRequestGet(context) {
             }
         }
 
-        // 严格去重并过滤合法的图片直链
+        // 严格去重并过滤出合法的 CDN 图片直链
         imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http') && (u.includes('cdninstagram.com') || u.includes('fbcdn.net') || u.includes('scontent')));
 
         if (imageUrls.length === 0) {
@@ -61,7 +61,7 @@ export async function onRequestGet(context) {
             });
         }
 
-        // 过滤博主名中的非法文件夹字符
+        // 清理博主名中的非法文件夹字符（保留中英文、数字、下划线）
         const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim() || 'Instagram_Media';
 
         return new Response(JSON.stringify({
