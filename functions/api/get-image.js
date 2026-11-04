@@ -19,36 +19,37 @@ export async function onRequestGet(context) {
         let imageUrls = [];
         let authorName = '';
 
-        // 通道 1：调用稳定解析接口获取完整的多图数组
+        // 优先使用目前对多图支持最好的备用解析源
         try {
-            const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-            if (apiRes.ok) {
-                const data = await apiRes.json();
-                if (data) {
-                    if (data.author) authorName = data.author;
-                    if (data.username) authorName = data.username;
-                    if (Array.isArray(data.urls)) imageUrls.push(...data.urls);
+            const altRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
+            if (altRes.ok) {
+                const altData = await altRes.json();
+                if (altData && altData.result) {
+                    if (altData.result.author) authorName = altData.result.author;
+                    if (Array.isArray(altData.result.images)) {
+                        imageUrls.push(...altData.result.images);
+                    }
                 }
             }
         } catch (e) {}
 
-        // 通道 2：备用全网高可用解析接口
-        if (imageUrls.length < 4) {
+        // 如果上面没拿到，换用第二个多图解析源
+        if (imageUrls.length <= 1) {
             try {
-                const altRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
-                if (altRes.ok) {
-                    const altData = await altRes.json();
-                    if (altData && altData.result) {
-                        if (altData.result.author) authorName = altData.result.author;
-                        if (Array.isArray(altData.result.images)) {
-                            imageUrls.push(...altData.result.images);
+                const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
+                if (apiRes.ok) {
+                    const data = await apiRes.json();
+                    if (data) {
+                        if (data.author || data.username) authorName = data.author || data.username;
+                        if (Array.isArray(data.urls)) {
+                            imageUrls.push(...data.urls);
                         }
                     }
                 }
             } catch (e) {}
         }
 
-        // 通道 3：抓取官方 embed 页面补充静态图片链接
+        // 兜底：抓取官方嵌入页
         try {
             const embedRes = await fetch(postUrl + 'embed/captioned/', {
                 headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)' }
@@ -64,7 +65,7 @@ export async function onRequestGet(context) {
             }
         } catch (e) {}
 
-        // 清洗去重：过滤小图和视频封面，保留所有高清大图
+        // 清洗、去重、过滤小图
         imageUrls = imageUrls.map(u => u.replace(/&amp;/g, '&').replace(/u0026/g, '&'));
         imageUrls = [...new Set(imageUrls)].filter(u => 
             typeof u === 'string' && 
