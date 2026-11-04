@@ -9,57 +9,70 @@ export async function onRequestGet(context) {
             });
         }
 
+        // 清理链接中的追踪参数
         if (postUrl.includes('?')) {
             postUrl = postUrl.split('?')[0];
+        }
+        if (!postUrl.endsWith('/')) {
+            postUrl += '/';
         }
 
         let imageUrls = [];
         let authorName = 'Instagram_Media';
 
-        // 线路 1：使用 SaveInsta / SnapInsta 类的公开轻量解析通道
-        try {
-            const res1 = await fetch(`https://instagramapi.io/v1/details?url=${encodeURIComponent(postUrl)}`);
-            const text1 = await res1.text();
-            const data1 = JSON.parse(text1);
-            if (data1 && data1.images) {
-                imageUrls.push(...data1.images);
+        // 核心方案：模拟 Instagram 官方移动端嵌入页面获取公开多图数据
+        const embedUrl = postUrl + 'embed/captioned/';
+        const res = await fetch(embedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5'
             }
-        } catch (e) {}
+        });
 
-        // 线路 2：如果线路1没拿到，使用备用解析通道 A
-        if (imageUrls.length === 0) {
-            try {
-                const res2 = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-                const text2 = await res2.text();
-                const data2 = JSON.parse(text2);
-                if (data2 && Array.isArray(data2.urls)) {
-                    imageUrls.push(...data2.urls);
+        if (res.ok) {
+            const html = await res.text();
+            
+            // 提取嵌入页面的所有高清图片链接
+            const imgRegex = /class="(1080|1080x1080|EmbeddedMediaImage)"[^>]*src="([^"]+)"/g;
+            let match;
+            while ((match = imgRegex.exec(html)) !== null) {
+                if (match[2]) {
+                    imageUrls.push(match[2].replace(/&amp;/g, '&'));
                 }
-            } catch (e) {}
+            }
+
+            // 备用匹配：提取所有标准图片 CDN 链接
+            if (imageUrls.length === 0) {
+                const altRegex = /https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g;
+                const altMatches = html.match(altRegex);
+                if (altMatches) {
+                    imageUrls.push(...altMatches);
+                }
+            }
         }
 
-        // 线路 3：万能兜底网页直连解析（直接提取 Instagram 官方 Open Graph 标签）
+        // 如果嵌入页没有取到，尝试直接抓取主页 og:image
         if (imageUrls.length === 0) {
-            try {
-                const res3 = await fetch(postUrl, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    }
-                });
-                const html = res3.ok ? await res3.text() : '';
-                const match = html.match(/<meta property="og:image" content="([^"]+)"/);
-                if (match && match[1]) {
-                    imageUrls.push(match[1].replace(/&amp;/g, '&'));
+            const mainRes = await fetch(postUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
-            } catch (e) {}
+            });
+            if (mainRes.ok) {
+                const mainHtml = await mainRes.text();
+                const ogMatch = mainHtml.match(/<meta property="og:image" content="([^"]+)"/);
+                if (ogMatch && ogMatch[1]) {
+                    imageUrls.push(ogMatch[1].replace(/&amp;/g, '&'));
+                }
+            }
         }
 
-        // 去重
+        // 数组去重
         imageUrls = [...new Set(imageUrls)];
 
         if (imageUrls.length === 0) {
-            return new Response(JSON.stringify({ success: false, error: '所有解析线路均未获取到图片，请确认该帖子为公开状态' }), {
+            return new Response(JSON.stringify({ success: false, error: '未能解析到图片，请确认该 Instagram 帖子为公开状态' }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
         }
