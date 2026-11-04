@@ -9,44 +9,50 @@ export async function onRequestGet(context) {
     }
 
     try {
-        // 调用稳定且免费的公开解析服务获取多图数据
-        const apiUrl = `https://api.cobalt.tools/api/json`;
-        const apiRes = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            },
-            body: JSON.stringify({
-                url: postUrl,
-                vQuality: 'max'
-            })
-        });
-
-        const data = await apiRes.json();
         let imageUrls = [];
+        let authorName = 'Instagram_Media';
 
-        // 适配返回的数据结构（支持多图或视频封面）
-        if (data && data.status === 'redirect' || data.status === 'success') {
-            if (data.url) {
-                imageUrls.push(data.url);
+        // 尝试通道 1：使用公开的 SnapInsta 兼容解析通道
+        try {
+            const res = await fetch(`https://api.alligato.com/v1/instagram?url=${encodeURIComponent(postUrl)}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
+            const data = await res.json();
+            if (data && data.images && Array.isArray(data.images)) {
+                imageUrls = data.images;
             }
-            if (data.picker && Array.isArray(data.picker)) {
-                imageUrls = data.picker.map(item => item.url);
-            }
+        } catch (e) {
+            console.warn('通道 1 解析失败，切换备用通道');
         }
 
-        // 兜底方案：如果 Cobalt 没返回，则尝试直接通过页面 JSON 抓取
+        // 如果通道 1 未获取到多图，使用强大的嵌入式页面和多重正则深度提取
         if (imageUrls.length === 0) {
-            const pageRes = await fetch(postUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15' }
+            const cleanUrl = postUrl.split('?')[0];
+            const embedRes = await fetch(`${cleanUrl}embed/captioned/`, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
+                }
             });
-            const html = await pageRes.text();
-            const matches = html.matchAll(/<meta property="og:image" content="([^"]+)"/g);
+            const html = await embedRes.text();
+
+            // 深度匹配页面中所有高清晰度的图片链接
+            const matches = html.matchAll(/class="EmbeddedMediaImage"[^>]+src="([^"]+)"/g);
             for (const match of matches) {
                 const decoded = match[1].replace(/&amp;/g, '&');
-                if (!imageUrls.includes(decoded)) imageUrls.push(decoded);
+                if (!imageUrls.includes(decoded)) {
+                    imageUrls.push(decoded);
+                }
+            }
+
+            // 兜底：如果 embed 没抓到，匹配标准的 og:image
+            if (imageUrls.length === 0) {
+                const ogMatches = html.matchAll(/<meta property="og:image" content="([^"]+)"/g);
+                for (const match of ogMatches) {
+                    const decoded = match[1].replace(/&amp;/g, '&');
+                    if (!imageUrls.includes(decoded)) {
+                        imageUrls.push(decoded);
+                    }
+                }
             }
         }
 
@@ -56,7 +62,7 @@ export async function onRequestGet(context) {
 
         return new Response(JSON.stringify({
             success: true,
-            authorName: 'Instagram_Media',
+            authorName: authorName,
             imageUrls: imageUrls
         }), {
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
