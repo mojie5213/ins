@@ -9,51 +9,63 @@ export async function onRequestGet(context) {
             });
         }
 
-        // 清理链接中的追踪参数
         if (postUrl.includes('?')) {
             postUrl = postUrl.split('?')[0];
         }
-
-        let imageUrls = [];
-        let authorName = 'Instagram_User';
-
-        // 通道 1：使用稳定公开的解析通道获取多图及博主信息
-        try {
-            const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-            if (apiRes.ok) {
-                const data = await apiRes.json();
-                
-                if (data && data.author) {
-                    authorName = data.author;
-                } else if (data && data.username) {
-                    authorName = data.username;
-                }
-
-                if (data && Array.isArray(data.urls) && data.urls.length > 0) {
-                    imageUrls.push(...data.urls);
-                } else if (data && data.url) {
-                    imageUrls.push(data.url);
-                }
-            }
-        } catch (e) {}
-
-        // 通道 2（备用）：如果通道1未获取到，尝试备用接口
-        if (imageUrls.length === 0) {
-            try {
-                const altRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
-                if (altRes.ok) {
-                    const altData = await altRes.json();
-                    if (altData && altData.result) {
-                        if (altData.result.author) authorName = altData.result.author;
-                        if (Array.isArray(altData.result.images)) {
-                            imageUrls.push(...altData.result.images);
-                        }
-                    }
-                }
-            } catch (e) {}
+        if (!postUrl.endsWith('/')) {
+            postUrl += '/';
         }
 
-        // 严格去重并过滤出合法的图片直链
+        let imageUrls = [];
+        let authorName = 'Instagram_Media';
+
+        // 尝试通过模拟手机浏览器抓取官方嵌入页
+        const embedUrl = postUrl + 'embed/captioned/';
+        const res = await fetch(embedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            }
+        });
+
+        if (res.ok) {
+            const html = await res.text();
+            
+            // 提取用户名作为文件夹名
+            const authorMatch = html.match(/"owner":\s*\{[^}]*"username":\s*"([^"]+)"/);
+            if (authorMatch && authorMatch[1]) {
+                authorName = authorMatch[1];
+            }
+
+            // 提取所有图片 CDN 链接
+            const cdnRegex = /https:\/\/scontent[^"']+\.cdninstagram\.com\/[^"'\s]+/g;
+            const cdnMatches = html.match(cdnRegex);
+            if (cdnMatches) {
+                imageUrls.push(...cdnMatches);
+            }
+        }
+
+        // 兜底：如果嵌入页没抓到，尝试抓取主页的 og:image
+        if (imageUrls.length === 0) {
+            const mainRes = await fetch(postUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            });
+            if (mainRes.ok) {
+                const mainHtml = await mainRes.text();
+                const ogMatch = mainHtml.match(/<meta property="og:image" content="([^"]+)"/);
+                if (ogMatch && ogMatch[1]) {
+                    imageUrls.push(ogMatch[1].replace(/&amp;/g, '&'));
+                }
+                const titleMatch = mainHtml.match(/<meta property="og:title" content="([^"]+?)\s*\(/);
+                if (titleMatch && titleMatch[1]) {
+                    authorName = titleMatch[1].trim();
+                }
+            }
+        }
+
+        // 去重并过滤
         imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http'));
 
         if (imageUrls.length === 0) {
@@ -62,7 +74,6 @@ export async function onRequestGet(context) {
             });
         }
 
-        // 清理博主名中的非法文件夹字符，防止新建文件夹失败
         const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim() || 'Instagram_Media';
 
         return new Response(JSON.stringify({
