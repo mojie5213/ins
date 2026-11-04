@@ -9,59 +9,61 @@ export async function onRequestGet(context) {
             });
         }
 
-        // 清理链接中的追踪参数
         if (postUrl.includes('?')) {
             postUrl = postUrl.split('?')[0];
         }
+        if (!postUrl.endsWith('/')) {
+            postUrl += '/';
+        }
 
         let imageUrls = [];
-        let authorName = 'Instagram_User';
+        let authorName = 'Instagram_Media';
 
-        // 使用稳定公开的解析通道
-        const apiRes = await fetch(`https://logos-api.vercel.app/api/ig?url=${encodeURIComponent(postUrl)}`);
-        
-        if (apiRes.ok) {
-            const data = await apiRes.json();
+        // 尝试直接抓取公开页面的 og:image
+        const res = await fetch(postUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+
+        if (res.ok) {
+            const html = await res.text();
             
-            // 提取博主名
-            if (data && data.author) {
-                authorName = data.author;
-            } else if (data && data.username) {
-                authorName = data.username;
+            // 提取 og:image 作为保底封面
+            const ogMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
+            if (ogMatch && ogMatch[1]) {
+                imageUrls.push(ogMatch[1].replace(/&amp;/g, '&'));
             }
 
-            // 提取所有图片直链
-            if (data && Array.isArray(data.urls) && data.urls.length > 0) {
-                imageUrls.push(...data.urls);
-            } else if (data && data.url) {
-                imageUrls.push(data.url);
+            // 提取标题中的博主名
+            const titleMatch = html.match(/<meta property="og:title" content="([^"]+?)\s*\(/);
+            if (titleMatch && titleMatch[1]) {
+                authorName = titleMatch[1].trim();
             }
         }
 
-        // 备用兜底通道
+        // 如果上面被拦截，使用一个稳定的公开解析后端镜像
         if (imageUrls.length === 0) {
-            const altRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
-            if (altRes.ok) {
-                const altData = await altRes.json();
-                if (altData && altData.result) {
-                    if (altData.result.author) authorName = altData.result.author;
-                    if (Array.isArray(altData.result.images)) {
-                        imageUrls.push(...altData.result.images);
+            const mirrorRes = await fetch(`https://api.vkrproject.com/v1/instagram?url=${encodeURIComponent(postUrl)}`);
+            if (mirrorRes.ok) {
+                const mirrorData = await mirrorRes.json();
+                if (mirrorData && mirrorData.result) {
+                    if (mirrorData.result.author) authorName = mirrorData.result.author;
+                    if (Array.isArray(mirrorData.result.images)) {
+                        imageUrls.push(...mirrorData.result.images);
                     }
                 }
             }
         }
 
-        // 严格去重并过滤出合法的 CDN 图片直链
-        imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http') && (u.includes('cdninstagram.com') || u.includes('fbcdn.net') || u.includes('scontent')));
+        imageUrls = [...new Set(imageUrls)].filter(u => typeof u === 'string' && u.startsWith('http'));
 
         if (imageUrls.length === 0) {
-            return new Response(JSON.stringify({ success: false, error: '未能解析到图片，请确认该帖子为公开状态' }), {
+            return new Response(JSON.stringify({ success: false, error: '解析失败，请确保链接正确且帖子为公开状态' }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
         }
 
-        // 清理博主名中的非法文件夹字符（保留中英文、数字、下划线）
         const safeAuthorName = authorName.replace(/[\/\\?%*:|"<>]/g, '_').trim() || 'Instagram_Media';
 
         return new Response(JSON.stringify({
