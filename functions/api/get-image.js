@@ -1,77 +1,67 @@
 export async function onRequestGet(context) {
     const url = new URL(context.request.url);
-    const targetUrl = url.searchParams.get('url');
-    const rapidApiKey = context.env.RAPIDAPI_KEY;
+    const postUrl = url.searchParams.get('url');
 
-    if (!targetUrl) {
-        return new Response(JSON.stringify({ success: false, error: '缺少目标链接' }), {
-            headers: { 'Content-Type': 'application/json' }
-        });
-    }
-
-    if (!rapidApiKey) {
-        return new Response(JSON.stringify({ success: false, error: '未配置 API 密钥' }), {
-            headers: { 'Content-Type': 'application/json' }
+    if (!postUrl) {
+        return new Response(JSON.stringify({ success: false, error: '缺少 Instagram 链接' }), {
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
     }
 
     try {
-        const apiHost = 'instagram-downloader-download-instagram-stories-videos4.p.rapidapi.com';
-        const apiPath = '/convert';
-        const apiRequestUrl = `https://${apiHost}${apiPath}?url=${encodeURIComponent(targetUrl)}`;
-
-        const apiRes = await fetch(apiRequestUrl, {
-            method: 'GET',
+        // 伪装成手机端浏览器访问 Instagram 帖子
+        const res = await fetch(postUrl, {
             headers: {
-                'X-RapidAPI-Key': rapidApiKey,
-                'X-RapidAPI-Host': apiHost
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+                'Accept-Language': 'en-US,en;q=0.9'
             }
         });
 
-        if (!apiRes.ok) {
-            const errText = await apiRes.text();
-            return new Response(JSON.stringify({ success: false, error: `API请求失败 (${apiRes.status}): ${errText}` }), {
-                headers: { 'Content-Type': 'application/json' }
-            });
+        const html = await res.text();
+        const imageUrls = [];
+
+        // 核心提取：通过正则匹配页面中的 og:image（Open Graph 封面图或大图）
+        const ogImageMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
+        if (ogImageMatch && ogImageMatch[1]) {
+            // 将 HTML 实体转义字符（如 &amp;）还原为 &
+            let decodedUrl = ogImageMatch[1].replace(/&amp;/g, '&');
+            imageUrls.push(decodedUrl);
         }
 
-        const data = await apiRes.json();
-        
-        let imageUrls = [];
-        if (data.media && Array.isArray(data.media)) {
-            imageUrls = data.media.map(item => item.url || item.thumbnail || item.u || item.th).filter(Boolean);
-        } else if (data.url) {
-            imageUrls = [data.url];
-        } else if (data.download_url) {
-            imageUrls = [data.download_url];
+        // 尝试匹配多图轮播中的其他图片
+        const allOgImages = html.matchAll(/<meta property="og:image" content="([^"]+)"/g);
+        for (const match of allOgImages) {
+            let decodedUrl = match[1].replace(/&amp;/g, '&');
+            if (!imageUrls.includes(decodedUrl)) {
+                imageUrls.push(decodedUrl);
+            }
         }
 
-        // 1. 尝试从链接中提取 Instagram 帖子的唯一短码 (例如 DeuULbPE9q4) 作为保底文件夹名
-        let postCode = 'post';
-        const match = targetUrl.match(/\/p\/([a-zA-Z0-9_-]+)/) || targetUrl.match(/\/reel\/([a-zA-Z0-9_-]+)/);
-        if (match && match[1]) {
-            postCode = `ins_${match[1]}`;
+        if (imageUrls.length === 0) {
+            throw new Error('未能从该链接解析出图片，请确保链接公开且正确');
         }
 
-        // 2. 优先使用 API 返回的作者名，如果没有则使用提取出的帖子短码文件夹名
-        const authorName = data.owner || data.username || data.author || postCode;
-
-        if (imageUrls.length > 0) {
-            return new Response(JSON.stringify({ 
-                success: true, 
-                imageUrls: imageUrls,
-                authorName: authorName
-            }), {
-                headers: { 'Content-Type': 'application/json' }
-            });
-        } else {
-            return new Response(JSON.stringify({ success: false, error: `未找到媒体直链` }), {
-                headers: { 'Content-Type': 'application/json' }
-            });
+        // 提取作者名字作为文件夹名（默认为 Instagram）
+        let authorName = 'Instagram_User';
+        const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
+        if (titleMatch && titleMatch[1]) {
+            const matchAuthor = titleMatch[1].match(/\((.*?)\)/);
+            if (matchAuthor && matchAuthor[1]) {
+                authorName = matchAuthor[1].replace(/[^a-zA-Z0-9_\u4e00-\u9fa5]/g, '_');
+            }
         }
+
+        return new Response(JSON.stringify({
+            success: true,
+            authorName: authorName,
+            imageUrls: imageUrls
+        }), {
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+
     } catch (err) {
-        return new Response(JSON.stringify({ success: false, error: `解析异常: ${err.message}` }), {
-            headers: { 'Content-Type': 'application/json' }
+        return new Response(JSON.stringify({ success: false, error: err.message }), {
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
     }
 }
